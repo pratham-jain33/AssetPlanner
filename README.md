@@ -1,1 +1,1 @@
-A Multi-Modal Stochastic Asset Synthesis Pipeline (\(\mathcal{M}\)) is formally defined as a tuple:\(\mathcal{M}=\langle \mathcal{D}_{\text{cc}},\mathcal{E}_{\phi },\mathcal{G}_{\theta },\mathcal{O}_{\psi },\mathcal{X}\rangle \)
+A Multi-Modal Stochastic Asset Synthesis Pipeline
