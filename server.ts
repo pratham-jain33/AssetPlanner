@@ -132,8 +132,26 @@ ${script}`,
     });
   }
 
+  app.get("/api/ping", (req, res) => {
+    res.status(200).send("pong");
+  });
+
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+
+    // Self-polling mechanism to keep Render free tier awake
+    const hostUrl = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL;
+    if (hostUrl) {
+      console.log(`Starting self-polling mechanism for URL: ${hostUrl}`);
+      setInterval(() => {
+        const pingUrl = `${hostUrl.replace(/\/$/, '')}/api/ping`;
+        fetch(pingUrl)
+          .then(res => console.log(`[Self-Ping] ${pingUrl} -> Status: ${res.status}`))
+          .catch(err => console.error(`[Self-Ping] Error pinging ${pingUrl}:`, err.message));
+      }, 5 * 60 * 1000); // exactly every 5 minutes
+    } else {
+      console.log('No RENDER_EXTERNAL_URL or APP_URL set, skipping self-polling mechanism.');
+    }
   });
 }
 
