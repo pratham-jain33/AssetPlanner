@@ -1,0 +1,6 @@
+{
+  "name": "Pexels Asset Planner",
+  "description": "Analyzes YouTube scripts to generate scene-by-scene plans with Pexels search links.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
