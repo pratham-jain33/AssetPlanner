@@ -2,9 +2,10 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ScenePlan, GenerationStats, HistoryItem } from './types';
-import { Loader2, History, Copy, Check } from 'lucide-react';
+import { Loader2, History, Copy, Check, Volume2, Mic, Square } from 'lucide-react';
+import { base64ToWavUrl, audioFileToBase64Wav } from './utils';
 
 export default function App() {
   const [script, setScript] = useState('');
@@ -17,6 +18,7 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [passwordInput, setPasswordInput] = useState('');
+  const [apiKeyInput, setApiKeyInput] = useState(() => localStorage.getItem('app_api_key') || '');
   const [authError, setAuthError] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>(() => {
@@ -30,8 +32,20 @@ export default function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // Audio state
+  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [voiceName, setVoiceName] = useState('Puck');
+  const [customVoice, setCustomVoice] = useState<{ name: string, base64: string } | null>(null);
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  
   // We don't persist the password so the user has to login on every reload
   const [savedPassword, setSavedPassword] = useState('');
+  const [savedApiKey, setSavedApiKey] = useState(() => localStorage.getItem('app_api_key') || '');
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -68,6 +82,12 @@ export default function App() {
       });
       if (res.ok) {
         setSavedPassword(passwordInput);
+        setSavedApiKey(apiKeyInput);
+        if (apiKeyInput) {
+          localStorage.setItem('app_api_key', apiKeyInput);
+        } else {
+          localStorage.removeItem('app_api_key');
+        }
       } else {
         setAuthError('Incorrect password');
       }
@@ -95,7 +115,10 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('app_password');
+    localStorage.removeItem('app_api_key');
     setSavedPassword('');
+    setSavedApiKey('');
+    setApiKeyInput('');
     setIsAuthenticated(false);
     setShowSettings(false);
   };
@@ -112,7 +135,7 @@ export default function App() {
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ script, sceneCount, password: savedPassword })
+        body: JSON.stringify({ script, sceneCount, password: savedPassword, apiKey: savedApiKey })
       });
 
       if (!res.ok) {
@@ -175,9 +198,19 @@ export default function App() {
                 type="password"
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
-                placeholder="Password"
+                placeholder="App Password"
                 className="w-full bg-[#050505] border border-white/10 rounded-lg p-3 text-sm text-slate-300 focus:outline-none focus:border-sky-500 transition-colors"
                 autoFocus
+              />
+            </div>
+            
+            <div>
+              <input
+                type="password"
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                placeholder="Your Gemini API Key (Optional)"
+                className="w-full bg-[#050505] border border-white/10 rounded-lg p-3 text-sm text-slate-300 focus:outline-none focus:border-sky-500 transition-colors"
               />
             </div>
             
@@ -234,9 +267,118 @@ export default function App() {
     setStats(item.stats);
     setShowHistory(false);
     setError(null);
+    setAudioUrl(null);
   };
 
   const wordCount = script.trim() ? script.trim().split(/\s+/).length : 0;
+
+  const handleGenerateAudio = async () => {
+    if (!script.trim()) return;
+    setIsGeneratingAudio(true);
+    setAudioUrl(null);
+    setError(null);
+    try {
+      const payload = {
+        text: script,
+        voiceName,
+        password: savedPassword,
+        apiKey: savedApiKey,
+        customVoiceAudioBase64: voiceName === 'custom' && customVoice ? customVoice.base64 : undefined
+      };
+
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        if (res.status === 401) {
+           setIsAuthenticated(false);
+           localStorage.removeItem('app_password');
+        }
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+           const errData = await res.json();
+           throw new Error(errData.error || `Failed to generate audio (Status ${res.status})`);
+        } else {
+           throw new Error(`Failed to generate audio: Status ${res.status}`);
+        }
+      }
+      const data = await res.json();
+      const url = base64ToWavUrl(data.audioBase64);
+      setAudioUrl(url);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Something went wrong generating audio');
+    } finally {
+      setIsGeneratingAudio(false);
+    }
+  };
+
+  const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setIsProcessingAudio(true);
+    try {
+      const base64 = await audioFileToBase64Wav(file);
+      setCustomVoice({ name: file.name, base64 });
+    } catch (err) {
+      console.error("Error processing audio:", err);
+      setError("Failed to process audio file for cloning. It must be a valid audio file.");
+    } finally {
+      setIsProcessingAudio(false);
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const file = new File([audioBlob], "recorded_voice.webm", { type: 'audio/webm' });
+
+        setIsProcessingAudio(true);
+        try {
+          const base64 = await audioFileToBase64Wav(file);
+          setCustomVoice({ name: "Microphone Recording", base64 });
+        } catch (err) {
+          console.error("Error processing audio:", err);
+          setError("Failed to process recorded audio for cloning.");
+        } finally {
+          setIsProcessingAudio(false);
+        }
+        
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+        }
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Error accessing microphone:", err);
+      setError("Microphone access denied. Try opening the app in a new tab if you are inside an iframe.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
 
   return (
     <div className="w-full h-[100dvh] bg-[#0A0A0B] text-slate-200 flex flex-col font-sans overflow-hidden">
@@ -344,7 +486,7 @@ export default function App() {
             <button 
               onClick={handleGenerate}
               disabled={isLoading || !script.trim()}
-              className="w-full py-3 bg-sky-500 hover:bg-sky-400 text-white font-bold rounded-lg transition-all shadow-lg shadow-sky-500/20 active:scale-[0.98] disabled:active:scale-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full py-3 bg-sky-500 hover:bg-sky-400 text-white font-bold rounded-lg transition-all shadow-lg shadow-sky-500/20 active:scale-[0.98] disabled:active:scale-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 mb-4"
             >
               {isLoading ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -355,6 +497,84 @@ export default function App() {
               )}
               {isLoading ? 'ANALYZING...' : (scenes.length > 0 ? 'RE-ANALYZE SCRIPT' : 'ANALYZE SCRIPT')}
             </button>
+
+            <div className="bg-[#141417] border border-white/10 p-4 rounded-xl flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                  <Volume2 className="w-3.5 h-3.5" /> Text to Speech
+                </label>
+                <select 
+                  className="bg-[#050505] border border-white/10 text-slate-300 text-[10px] rounded px-2 py-1 focus:outline-none focus:border-sky-500 max-w-[120px] truncate"
+                  value={voiceName}
+                  onChange={(e) => setVoiceName(e.target.value)}
+                >
+                  <option value="Puck">Puck</option>
+                  <option value="Charon">Charon</option>
+                  <option value="Kore">Kore</option>
+                  <option value="Fenrir">Fenrir</option>
+                  <option value="Zephyr">Zephyr</option>
+                  <option value="custom">Custom Voice</option>
+                </select>
+              </div>
+
+              {voiceName === 'custom' && (
+                <div className="flex flex-col gap-3 p-3 bg-black/40 rounded-lg border border-white/5">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] text-slate-400 font-medium">Record voice sample</label>
+                    <p className="text-[9px] text-slate-500 italic">
+                      Read the following text naturally for 10-15 seconds:
+                      <br/><span className="text-slate-300">"The quick brown fox jumps over the lazy dog. Programming is a fun and creative process that allows you to build amazing things from scratch. Reading this out loud helps analyze speech patterns."</span>
+                    </p>
+                    <button 
+                      onClick={isRecording ? stopRecording : startRecording}
+                      disabled={isProcessingAudio || isGeneratingAudio}
+                      className={`py-2 px-3 text-[10px] font-bold rounded flex items-center justify-center gap-2 transition-all ${
+                        isRecording 
+                          ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30 border border-red-500/50' 
+                          : 'bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10'
+                      }`}
+                    >
+                      {isRecording ? <Square className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                      {isRecording ? 'STOP RECORDING' : 'START RECORDING'}
+                    </button>
+                  </div>
+                  
+                  <div className="flex items-center justify-center">
+                    <span className="w-full h-px bg-white/5"></span>
+                    <span className="px-2 text-[9px] text-slate-600 font-bold uppercase">OR</span>
+                    <span className="w-full h-px bg-white/5"></span>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] text-slate-400 font-medium">Upload voice sample (audio file)</label>
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      onChange={handleAudioUpload}
+                      disabled={isProcessingAudio || isGeneratingAudio || isRecording}
+                      className="text-[10px] text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-semibold file:bg-sky-500/10 file:text-sky-400 hover:file:bg-sky-500/20 max-w-full"
+                    />
+                  </div>
+                  
+                  {isProcessingAudio && <p className="text-[10px] text-sky-400 animate-pulse mt-1">Processing audio for cloning...</p>}
+                  {customVoice && !isProcessingAudio && <p className="text-[10px] text-emerald-400 mt-1">Custom voice ready: {customVoice.name}</p>}
+                </div>
+              )}
+
+              <button 
+                onClick={handleGenerateAudio}
+                disabled={isGeneratingAudio || !script.trim() || (voiceName === 'custom' && !customVoice) || isProcessingAudio}
+                className="w-full py-2 bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-xs rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 border border-white/10 hover:border-white/20"
+              >
+                {isGeneratingAudio ? <Loader2 className="w-3 h-3 animate-spin" /> : <Volume2 className="w-3 h-3" />}
+                {isGeneratingAudio ? 'GENERATING AUDIO...' : 'GENERATE AUDIO'}
+              </button>
+              {audioUrl && (
+                <div className="mt-2 text-center animate-in fade-in zoom-in duration-300">
+                   <audio src={audioUrl} controls className="w-full h-8 [&::-webkit-media-controls-panel]:bg-slate-800 [&::-webkit-media-controls-current-time-display]:text-slate-300 [&::-webkit-media-controls-time-remaining-display]:text-slate-300" autoPlay />
+                </div>
+              )}
+            </div>
           </div>
         </aside>
 
