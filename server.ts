@@ -60,9 +60,22 @@ async function startServer() {
         : '';
         
       const startTime = Date.now();
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: `Analyze the following YouTube script and break it down into a scene-by-scene asset plan.
+      
+      const modelsToTry = textModel && textModel !== 'auto' 
+        ? [textModel, "gemma-26b", "a4b", "gemini-3.5-flash"] 
+        : ["gemma-4-31b", "gemma-26b", "a4b", "gemini-3.5-flash"];
+
+      // Deduplicate keeping order
+      const uniqueModels = [...new Set(modelsToTry)];
+
+      let response: any;
+      let lastError: any;
+
+      for (const modelName of uniqueModels) {
+        try {
+          response = await ai.models.generateContent({
+            model: modelName,
+            contents: `Analyze the following YouTube script and break it down into a scene-by-scene asset plan.
 ${countInstruction}
 IMPORTANT: Each scene's scriptSnippet MUST contain approximately 10-15 words.
 
@@ -70,28 +83,39 @@ For each scene, provide a title, a snippet of the script, a visual description o
 
 Script to analyze:
 ${script}`,
-        config: {
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-               type: Type.OBJECT,
-               properties: {
-                 title: { type: Type.STRING, description: "Title of the scene, e.g., Hook, Introduction" },
-                 scriptSnippet: { type: Type.STRING, description: "Relevant portion of the script, 10-15 words approx." },
-                 visualDescription: { type: Type.STRING, description: "Visual description of the scene" },
-                 searchTerms: {
-                   type: Type.ARRAY,
-                   items: { type: Type.STRING },
-                   description: "List of 1-4 word search terms for stock footage"
-                 }
-               },
-               required: ["title", "scriptSnippet", "visualDescription", "searchTerms"]
+            config: {
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                   type: Type.OBJECT,
+                   properties: {
+                     title: { type: Type.STRING, description: "Title of the scene, e.g., Hook, Introduction" },
+                     scriptSnippet: { type: Type.STRING, description: "Relevant portion of the script, 10-15 words approx." },
+                     visualDescription: { type: Type.STRING, description: "Visual description of the scene" },
+                     searchTerms: {
+                       type: Type.ARRAY,
+                       items: { type: Type.STRING },
+                       description: "List of 1-4 word search terms for stock footage"
+                     }
+                   },
+                   required: ["title", "scriptSnippet", "visualDescription", "searchTerms"]
+                }
+              }
             }
-          }
+          });
+          break; // success
+        } catch (err: any) {
+          console.warn(`Model ${modelName} failed:`, err.status, err.message);
+          lastError = err;
         }
-      });
+      }
+
+      if (!response) {
+        throw lastError || new Error("All text generation models failed");
+      }
+      
       const endTime = Date.now();
       const timeMs = endTime - startTime;
 

@@ -15,6 +15,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [mediaPref, setMediaPref] = useState<'photos' | 'videos'>('photos');
   const [sceneCount, setSceneCount] = useState<string>('auto');
+  const [textModel, setTextModel] = useState<string>('auto');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [passwordInput, setPasswordInput] = useState('');
@@ -135,7 +136,7 @@ export default function App() {
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ script, sceneCount, password: savedPassword, apiKey: savedApiKey })
+        body: JSON.stringify({ script, sceneCount, password: savedPassword, apiKey: savedApiKey, textModel })
       });
 
       if (!res.ok) {
@@ -446,17 +447,34 @@ export default function App() {
         {/* Sidebar: Script Input */}
         <aside className="w-full md:w-80 border-b md:border-b-0 md:border-r border-white/10 flex flex-col bg-[#0F0F11] shrink-0 h-1/3 md:h-auto">
           <div className="p-6 flex flex-col h-full">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex flex-col gap-3 mb-3">
               <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Project Script</label>
-              <div className="flex items-center gap-2">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Scenes:</label>
-                <input 
-                  type="text" 
-                  value={sceneCount} 
-                  onChange={(e) => setSceneCount(e.target.value)}
-                  placeholder="Auto"
-                  className="bg-[#050505] border border-white/10 text-slate-300 text-[10px] rounded px-2 py-0.5 w-12 text-center focus:outline-none focus:border-sky-500 placeholder-slate-500"
-                />
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Model:</label>
+                  <select 
+                    value={textModel} 
+                    onChange={(e) => setTextModel(e.target.value)}
+                    className="bg-[#050505] border border-white/10 text-slate-300 text-[10px] rounded px-2 py-0.5 w-24 focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="auto">Auto</option>
+                    <option value="gemma-4-31b">Gemma 4 31B</option>
+                    <option value="gemma-26b">Gemma 26B</option>
+                    <option value="a4b">A4B</option>
+                    <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                    <option value="gemini-3.5-pro">Gemini 3.5 Pro</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Scenes:</label>
+                  <input 
+                    type="text" 
+                    value={sceneCount} 
+                    onChange={(e) => setSceneCount(e.target.value)}
+                    placeholder="Auto"
+                    className="bg-[#050505] border border-white/10 text-slate-300 text-[10px] rounded px-2 py-0.5 w-12 text-center focus:outline-none focus:border-sky-500 placeholder-slate-500"
+                  />
+                </div>
               </div>
             </div>
             <div className="flex-1 relative mb-6">
